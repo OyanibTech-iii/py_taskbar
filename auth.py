@@ -41,6 +41,51 @@ class AuthManager:
         self.config = {}
 
 
+def _round_rect(canvas, x1, y1, x2, y2, r, **kwargs):
+    pts = [
+        x1+r, y1, x2-r, y1,
+        x2, y1, x2, y1+r,
+        x2, y2-r, x2, y2,
+        x2-r, y2, x1+r, y2,
+        x1, y2, x1, y2-r,
+        x1, y1+r, x1, y1
+    ]
+    return canvas.create_polygon(pts, smooth=True, **kwargs)
+
+
+def _make_round_btn(parent, text, command, bg, fg, font, width=200, height=42):
+    frame = tk.Frame(parent, bg=THEME["bg_main"], width=width, height=height)
+    frame.pack_propagate(False)
+    canvas = tk.Canvas(frame, width=width, height=height, highlightthickness=0, bg=THEME["bg_main"])
+    canvas.place(x=0, y=0)
+    r = 12
+    _round_rect(canvas, 2, 2, width-2, height-2, r, fill=bg, outline="", tags="bg")
+    canvas.create_text(width//2, height//2, text=text, fill=fg, font=font, tags="txt")
+    def on_enter(_):
+        canvas.itemconfig("bg", fill="#1e293b" if bg == THEME["bg_dark"] else bg)
+    def on_leave(_):
+        canvas.itemconfig("bg", fill=bg)
+    def on_click(_):
+        command()
+    canvas.bind("<Button-1>", on_click)
+    canvas.bind("<Enter>", on_enter)
+    canvas.bind("<Leave>", on_leave)
+    frame.bind("<Button-1>", on_click)
+    return frame
+
+
+def _make_round_entry(parent, textvariable, show, width=200):
+    frame = tk.Frame(parent, bg=THEME["bg_main"])
+    canvas = tk.Canvas(frame, width=width, height=40, highlightthickness=0, bg=THEME["bg_main"])
+    canvas.pack()
+    _round_rect(canvas, 2, 2, width-2, 38, 12, fill=THEME["bg_card"], outline=THEME["border"], width=2)
+    entry = tk.Entry(frame, textvariable=textvariable, show=show, width=16,
+                     font=(THEME["font_family"], 11), justify="center",
+                     bd=0, highlightthickness=0, bg=THEME["bg_card"])
+    canvas.create_window(width//2, 20, window=entry, width=width-16, height=32)
+    return frame
+
+
 def build_auth_ui(root, auth, on_success):
     root.title("AppTracker — Authentication")
     root.geometry("1024x680")
@@ -57,6 +102,10 @@ def build_auth_ui(root, auth, on_success):
 
     container = tk.Frame(root, bg=THEME["bg_main"])
     container.pack(fill="both", expand=True)
+
+    btn_font = (THEME["font_family"], 11, "bold")
+    btn_bg = THEME["bg_dark"]
+    btn_fg = "#ffffff"
 
     def clear():
         for w in container.winfo_children():
@@ -88,9 +137,7 @@ def build_auth_ui(root, auth, on_success):
         def set_err(msg):
             err_lbl.config(text=msg)
         body_builder(container, set_err)
-        tk.Button(container, text=btn_text, bg=THEME["bg_dark"], fg="#ffffff",
-                  font=(THEME["font_family"], 11, "bold"), padx=28, pady=7,
-                  relief="flat", command=btn_cmd).pack(pady=(16, 4))
+        _make_round_btn(container, btn_text, btn_cmd, btn_bg, btn_fg, btn_font, width=200, height=42).pack()
 
     def do_welcome():
         def body(parent, set_err):
@@ -114,19 +161,15 @@ def build_auth_ui(root, auth, on_success):
                      bg=THEME["bg_main"], fg=THEME["text_muted"],
                      font=(THEME["font_family"], 9)).pack(pady=(0, 10))
             f1 = tk.Frame(parent, bg=THEME["bg_main"])
-            f1.pack(pady=3)
+            f1.pack(pady=4)
             tk.Label(f1, text="PIN:", bg=THEME["bg_main"], fg=THEME["text_primary"],
                      font=(THEME["font_family"], 10), width=10, anchor="e").pack(side="left")
-            tk.Entry(f1, textvariable=pin_var, show="•", width=16,
-                     font=(THEME["font_family"], 11), justify="center",
-                     relief="solid", bd=1).pack(side="left", padx=6)
+            _make_round_entry(f1, pin_var, "•", width=180).pack(side="left", padx=8)
             f2 = tk.Frame(parent, bg=THEME["bg_main"])
-            f2.pack(pady=3)
+            f2.pack(pady=4)
             tk.Label(f2, text="Confirm:", bg=THEME["bg_main"], fg=THEME["text_primary"],
                      font=(THEME["font_family"], 10), width=10, anchor="e").pack(side="left")
-            tk.Entry(f2, textvariable=confirm_var, show="•", width=16,
-                     font=(THEME["font_family"], 11), justify="center",
-                     relief="solid", bd=1).pack(side="left", padx=6)
+            _make_round_entry(f2, confirm_var, "•", width=180).pack(side="left", padx=8)
         def on_set():
             pin = pin_var.get()
             confirm = confirm_var.get()
@@ -149,11 +192,7 @@ def build_auth_ui(root, auth, on_success):
             tk.Label(parent, text="Enter your PIN to unlock the application",
                      bg=THEME["bg_main"], fg=THEME["text_muted"],
                      font=(THEME["font_family"], 9)).pack(pady=(0, 14))
-            entry = tk.Entry(parent, textvariable=pin_var, show="•", width=16,
-                             font=(THEME["font_family"], 14), justify="center",
-                             relief="solid", bd=1)
-            entry.pack()
-            entry.focus_set()
+            _make_round_entry(parent, pin_var, "•", width=220).pack()
             pin_var.trace_add("write", lambda *_: _set_err[0](""))
         def on_unlock():
             pin = pin_var.get()
