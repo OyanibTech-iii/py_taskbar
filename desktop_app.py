@@ -11,6 +11,7 @@ import sys
 import os
 import time
 import json
+import math
 import threading
 import platform
 import subprocess
@@ -260,6 +261,11 @@ class DesktopAppGUI:
         self.notebook.add(self.tab_logs, text="Activity Logs")
         self.build_logs_tab()
 
+        # Tab 5: Real-time Radar
+        self.tab_radar = tk.Frame(self.notebook, bg=THEME["bg_main"])
+        self.notebook.add(self.tab_radar, text="Real-time Radar")
+        self.build_realtime_tab()
+
     def build_processes_tab(self):
         # Search Bar
         search_frame = tk.Frame(self.tab_processes, bg=THEME["bg_main"])
@@ -374,6 +380,152 @@ class DesktopAppGUI:
         self.txt_logs = tk.Text(frame, bg=THEME["bg_card"], fg=THEME["text_primary"], font=(THEME["font_mono"], 9), bd=0)
         self.txt_logs.pack(fill="both", expand=True, padx=10, pady=10)
 
+    def build_realtime_tab(self):
+        container = tk.Frame(self.tab_radar, bg=THEME["bg_main"])
+        container.pack(fill="both", expand=True)
+
+        header_row = tk.Frame(container, bg=THEME["bg_main"])
+        header_row.pack(fill="x", pady=(12, 0))
+        tk.Label(header_row, text="Real-time Radar & Monitoring", bg=THEME["bg_main"],
+                 fg=THEME["text_primary"], font=(THEME["font_family"], 12, "bold")).pack(side="left", padx=20)
+        btn_report = tk.Button(header_row, text="Export Report", bg=THEME["bg_dark"], fg="#ffffff",
+                               relief="flat", font=(THEME["font_family"], 9, "bold"), padx=12, pady=3,
+                               command=self.export_radar_report)
+        btn_report.pack(side="right", padx=20)
+
+        content = tk.Frame(container, bg=THEME["bg_main"])
+        content.pack(fill="both", expand=True, padx=20, pady=10)
+
+        self.radar_labels = ["CPU Load", "RAM Usage", "Processes", "Uptime", "Focus"]
+        self.radar_maxes = [100, 100, 100, 100, 100]
+
+        chart_frame = tk.Frame(content, bg=THEME["bg_card"], bd=1, relief="solid",
+                               highlightbackground=THEME["border"])
+        chart_frame.pack(side="left", fill="both", expand=True)
+        self.radar_canvas = tk.Canvas(chart_frame, bg=THEME["bg_card"], highlightthickness=0)
+        self.radar_canvas.pack(fill="both", expand=True, padx=10, pady=10)
+
+        right_panel = tk.Frame(content, bg=THEME["bg_card"], bd=1, relief="solid",
+                               highlightbackground=THEME["border"], width=260)
+        right_panel.pack(side="right", fill="y", padx=(10, 0))
+        right_panel.pack_propagate(False)
+
+        tk.Label(right_panel, text="Live Metrics", bg=THEME["bg_card"], fg=THEME["text_primary"],
+                 font=(THEME["font_family"], 11, "bold")).pack(anchor="w", padx=15, pady=(12, 8))
+
+        self.metric_widgets = {}
+        metric_defs = [
+            ("cpu", "CPU Total"), ("ram", "RAM Total"), ("procs", "Processes"),
+            ("uptime", "Uptime"), ("top_app", "Top App"), ("tracking", "Tracking")
+        ]
+        for key, label in metric_defs:
+            row = tk.Frame(right_panel, bg=THEME["bg_card"])
+            row.pack(fill="x", padx=15, pady=3)
+            tk.Label(row, text=label, bg=THEME["bg_card"], fg=THEME["text_secondary"],
+                     font=(THEME["font_family"], 9)).pack(side="left")
+            val_lbl = tk.Label(row, text="--", bg=THEME["bg_card"], fg=THEME["text_primary"],
+                               font=(THEME["font_mono"], 9, "bold"))
+            val_lbl.pack(side="right")
+            self.metric_widgets[key] = val_lbl
+
+        self.root.after(200, self.refresh_radar)
+
+    def get_radar_values(self):
+        cpu = min(100, sum(p['cpu'] for p in self.engine.processes))
+        ram_mb = sum(p['memory_mb'] for p in self.engine.processes)
+        ram = min(100, ram_mb / 16.384)
+        procs = min(100, len(self.engine.processes) * 2)
+        elapsed = time.time() - self.engine.start_time
+        uptime = min(100, elapsed / 36.0)
+        focus = 85 if self.engine.is_tracking else 30
+        return [cpu, ram, procs, uptime, focus]
+
+    def refresh_radar(self):
+        c = self.radar_canvas
+        c.delete("all")
+        w = c.winfo_width()
+        h = c.winfo_height()
+        if w < 50 or h < 50:
+            return
+        cx, cy = w // 2, h // 2
+        radius = min(cx, cy) - 40
+        if radius < 20:
+            return
+        n = 5
+        angles = [-math.pi / 2 + 2 * math.pi * i / n for i in range(n)]
+
+        def point(r, angle):
+            return cx + r * math.cos(angle), cy + r * math.sin(angle)
+
+        for level in [20, 40, 60, 80, 100]:
+            r = radius * level / 100
+            pts = []
+            for a in angles:
+                x, y = point(r, a)
+                pts.extend([x, y])
+            c.create_polygon(pts, outline=THEME["border"], fill="", width=1)
+
+        for a, lbl in zip(angles, self.radar_labels):
+            x, y = point(radius, a)
+            c.create_line(cx, cy, x, y, fill=THEME["border"], width=1)
+            lx, ly = point(radius + 18, a)
+            c.create_text(lx, ly, text=lbl, fill=THEME["text_secondary"],
+                          font=(THEME["font_mono"], 8))
+
+        vals = self.get_radar_values()
+        pts = []
+        for v, a in zip(vals, angles):
+            r = radius * v / 100
+            x, y = point(r, a)
+            pts.extend([x, y])
+        c.create_polygon(pts, outline=THEME["accent_green"], fill=THEME["accent_green"],
+                         stipple="gray25", width=2)
+        for i in range(0, len(pts), 2):
+            c.create_oval(pts[i] - 3, pts[i + 1] - 3, pts[i] + 3, pts[i + 1] + 3,
+                          fill=THEME["accent_green"], outline="")
+
+        self.metric_widgets["cpu"].config(text=f"{vals[0]:.1f}%")
+        self.metric_widgets["ram"].config(text=f"{sum(p['memory_mb'] for p in self.engine.processes):.1f} MB")
+        self.metric_widgets["procs"].config(text=str(len(self.engine.processes)))
+        elapsed = time.time() - self.engine.start_time
+        mins, secs = int(elapsed // 60), int(elapsed % 60)
+        self.metric_widgets["uptime"].config(text=f"{mins}m {secs}s")
+        self.metric_widgets["top_app"].config(text=self.engine.active_app[:18])
+        self.metric_widgets["tracking"].config(text="Active" if self.engine.is_tracking else "Paused")
+
+    def export_radar_report(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="radar_report.json"
+        )
+        if not path:
+            return
+        vals = self.get_radar_values()
+        elapsed = time.time() - self.engine.start_time
+        mins, secs = int(elapsed // 60), int(elapsed % 60)
+        report = {
+            "timestamp": datetime.now().isoformat(),
+            "tracking_active": self.engine.is_tracking,
+            "active_app": self.engine.active_app,
+            "uptime": f"{mins}m {secs}s",
+            "radar_metrics": {
+                self.radar_labels[i]: vals[i] for i in range(len(self.radar_labels))
+            },
+            "processes": [
+                {"name": p["name"], "cpu": p["cpu"], "memory_mb": p["memory_mb"],
+                 "category": p["category"]}
+                for p in self.engine.processes[:20]
+            ],
+            "app_durations": {
+                name: {"duration_sec": d["seconds"], "avg_cpu": round(d["cpu_sum"] / max(1, d["samples"]), 1),
+                       "avg_ram_mb": round(d["ram_sum"] / max(1, d["samples"]), 1)}
+                for name, d in self.engine.app_durations.items()
+            }
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2)
+
     def build_statusbar(self):
         sb = tk.Frame(self.root, bg=THEME["bg_secondary"], bd=1, relief="solid", highlightbackground=THEME["border"])
         sb.pack(fill="x", side="bottom")
@@ -472,6 +624,7 @@ class DesktopAppGUI:
                 self.root.after(0, self.refresh_tree)
                 self.root.after(0, self.refresh_analytics)
                 self.root.after(0, self.refresh_logs)
+                self.root.after(0, self.refresh_radar)
 
                 time.sleep(self.engine.polling_interval)
 
