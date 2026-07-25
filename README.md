@@ -84,11 +84,3 @@ Outputs process snapshots as JSON to stdout.
 - Orphaned processes (pid 0 or 4)
 
 ---
-
-## Badges (above)
-
-- ![Python](https://img.shields.io/badge/python-3.8%2B-blue?logo=python)
-- ![Platform](https://img.shields.io/badge/platform-win%20%7C%20macos%20%7C%20linux-lightgrey)
-- ![Tkinter](https://img.shields.io/badge/GUI-tkinter-ff69b4)
-- ![License](https://img.shields.io/badge/license-MIT-green)
-- ![Status](https://img.shields.io/badge/status-active-brightgreen)
