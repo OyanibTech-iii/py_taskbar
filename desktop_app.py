@@ -51,6 +51,7 @@ class AppTrackerEngine:
         self.is_tracking = True
         self.polling_interval = 3.0
         self.processes = []
+        self.threats = []
         self.app_durations = {}  # {app_name: {'seconds': int, 'cpu_sum': float, 'ram_sum': float, 'samples': int}}
         self.activity_logs = []
         self.active_app = "Desktop"
@@ -92,6 +93,14 @@ class AppTrackerEngine:
                     mem_mb = round((info['memory_info'].rss if info['memory_info'] else 0) / (1024 * 1024), 1)
                     cpu_pct = round(info['cpu_percent'] or 0.0, 1)
                     name = info['name'] or f"PID-{info['pid']}"
+                    try:
+                        exe = p.exe() or ""
+                    except Exception:
+                        exe = ""
+                    try:
+                        ppid = p.ppid()
+                    except Exception:
+                        ppid = 0
                     
                     procs.append({
                         'pid': info['pid'],
@@ -99,7 +108,9 @@ class AppTrackerEngine:
                         'cpu': cpu_pct,
                         'memory_mb': mem_mb,
                         'user': info['username'] or 'user',
-                        'category': self.categorize(name)
+                        'category': self.categorize(name),
+                        'exe': exe,
+                        'ppid': ppid
                     })
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
@@ -124,7 +135,9 @@ class AppTrackerEngine:
                                 'cpu': cpu,
                                 'memory_mb': round(rss_kb / 1024.0, 1),
                                 'user': user,
-                                'category': self.categorize(comm)
+                                'category': self.categorize(comm),
+                                'exe': "",
+                                'ppid': 0
                             })
             except Exception:
                 pass
@@ -150,6 +163,79 @@ class AppTrackerEngine:
                 self.app_durations[name]['cpu_sum'] += p['cpu']
                 self.app_durations[name]['ram_sum'] += p['memory_mb']
                 self.app_durations[name]['samples'] += 1
+
+        self.analyze_threats()
+
+    def analyze_threats(self):
+        threats = []
+        cpu_vals = [p['cpu'] for p in self.processes]
+        avg_cpu = sum(cpu_vals) / max(len(cpu_vals), 1)
+
+        suspicious_names_known = [
+            "mimikatz", "nc.exe", "netcat", "psexec", "payload.dll", "payload.exe",
+            "winlogin.exe", "svchosts.exe", "scvhost.exe", "windows.exe",
+            "rundll32.exe", "regsvr32.exe", "mshta.exe", "cscript.exe", "wscript.exe",
+            "powershell_ise.exe", "cmd.exe", "explorer.exe"
+        ]
+        known_system = {"svchost.exe", "csrss.exe", "wininit.exe", "lsass.exe",
+                        "services.exe", "winlogon.exe", "smss.exe", "system",
+                        "system idle process", "registry", "memory compression"}
+
+        for p in self.processes:
+            indicators = []
+            score = 0
+            name_lower = p['name'].lower()
+            clean_name = ''.join(c for c in p['name'] if c.isalnum())
+
+            if clean_name.isdigit():
+                indicators.append("Numeric-only process name")
+                score += 35
+            if len(p['name']) <= 2 and p['name'].lower() not in known_system:
+                indicators.append("Suspiciously short name")
+                score += 30
+            if p['name'].count('.') > 2:
+                indicators.append("Multiple extensions")
+                score += 25
+
+            for sn in suspicious_names_known:
+                if sn in name_lower and name_lower not in known_system:
+                    indicators.append(f"Matches known threat vector: {sn}")
+                    score += 45
+                    break
+
+            if avg_cpu > 1 and p['cpu'] > avg_cpu * 6 and p['cpu'] > 30:
+                indicators.append("Anomalous CPU spike")
+                score += 20
+            if p['memory_mb'] > 800 and p['category'] == "Productivity":
+                indicators.append("Uncategorized high memory usage")
+                score += 15
+
+            exe_lower = p.get('exe', '').lower()
+            temp_paths = ['\\temp\\', '\\tmp\\', '\\downloads\\', '\\appdata\\local\\temp\\']
+            if exe_lower and any(tp in exe_lower for tp in temp_paths):
+                indicators.append("Running from temp directory")
+                score += 35
+
+            ppid = p.get('ppid', 0)
+            if ppid == 0 or ppid == 4:
+                indicators.append("Orphaned or unusual parent")
+                score += 15
+
+            if score > 0:
+                threats.append({
+                    'pid': p['pid'],
+                    'name': p['name'],
+                    'risk_score': min(score, 99),
+                    'indicators': indicators,
+                    'cpu': p['cpu'],
+                    'memory_mb': p['memory_mb'],
+                    'user': p['user'],
+                    'category': p['category'],
+                    'exe': p.get('exe', '')
+                })
+
+        threats.sort(key=lambda x: x['risk_score'], reverse=True)
+        self.threats = threats
 
     def log_event(self, evt_type, app_name, details):
         self.activity_logs.insert(0, {
@@ -265,6 +351,11 @@ class DesktopAppGUI:
         self.tab_radar = tk.Frame(self.notebook, bg=THEME["bg_main"])
         self.notebook.add(self.tab_radar, text="Real-time Radar")
         self.build_realtime_tab()
+
+        # Tab 6: Security Scan
+        self.tab_security = tk.Frame(self.notebook, bg=THEME["bg_main"])
+        self.notebook.add(self.tab_security, text="Security Scan")
+        self.build_security_tab()
 
     def build_processes_tab(self):
         # Search Bar
@@ -526,6 +617,79 @@ class DesktopAppGUI:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
 
+    def export_threats_to_csv(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile="threat_scan.csv"
+        )
+        if not path:
+            return
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            f.write('"Risk Score","Process Name","PID","Indicators","CPU %","Memory MB","User","Category"\n')
+            for t in self.engine.threats:
+                ind = "; ".join(t["indicators"])
+                f.write(f'{t["risk_score"]},"{t["name"]}",{t["pid"]},"{ind}",{t["cpu"]},{t["memory_mb"]},"{t["user"]}","{t["category"]}"\n')
+
+    def build_security_tab(self):
+        container = tk.Frame(self.tab_security, bg=THEME["bg_main"])
+        container.pack(fill="both", expand=True)
+
+        header = tk.Frame(container, bg=THEME["bg_main"])
+        header.pack(fill="x", pady=(12, 0))
+        tk.Label(header, text="Hidden Apps & Threat Detection", bg=THEME["bg_main"],
+                 fg=THEME["text_primary"], font=(THEME["font_family"], 12, "bold")).pack(side="left", padx=20)
+        tk.Label(header, text="Heuristic scan — may produce false positives",
+                 bg=THEME["bg_main"], fg=THEME["text_muted"],
+                 font=(THEME["font_mono"], 8)).pack(side="left", padx=(8, 0))
+        btn_export = tk.Button(header, text="Export CSV", bg=THEME["bg_dark"], fg="#ffffff",
+                               relief="flat", font=(THEME["font_family"], 9, "bold"), padx=12, pady=3,
+                               command=self.export_threats_to_csv)
+        btn_export.pack(side="right", padx=20)
+
+        summary = tk.Frame(container, bg=THEME["bg_main"])
+        summary.pack(fill="x", padx=20, pady=(8, 0))
+        self.threat_count_lbl = tk.Label(summary, text="Scanning...", bg=THEME["bg_main"],
+                                         fg=THEME["text_secondary"], font=(THEME["font_family"], 10))
+        self.threat_count_lbl.pack(side="left")
+
+        cols = ("Risk Score", "Process Name", "PID", "Indicators", "CPU %", "Memory (MB)", "User")
+        self.tree_threats = ttk.Treeview(container, columns=cols, show="headings", selectmode="browse")
+        col_widths = [90, 220, 70, 320, 70, 100, 100]
+        for c, w in zip(cols, col_widths):
+            self.tree_threats.heading(c, text=c)
+            self.tree_threats.column(c, width=w, anchor="center")
+        self.tree_threats.column("Process Name", anchor="w")
+        self.tree_threats.column("Indicators", anchor="w")
+
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.tree_threats.yview)
+        self.tree_threats.configure(yscroll=scrollbar.set)
+        self.tree_threats.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=10)
+        scrollbar.pack(side="right", fill="y", padx=(0, 20), pady=10)
+
+        self.refresh_threats()
+
+    def refresh_threats(self):
+        for item in self.tree_threats.get_children():
+            self.tree_threats.delete(item)
+        threats = self.engine.threats
+        if not threats:
+            self.threat_count_lbl.config(text="No threats detected — system appears clean")
+            return
+        high = sum(1 for t in threats if t["risk_score"] >= 50)
+        med = sum(1 for t in threats if 20 <= t["risk_score"] < 50)
+        self.threat_count_lbl.config(text=f"{len(threats)} flagged  ·  {high} high risk  ·  {med} medium risk")
+        for t in threats:
+            ind = "; ".join(t["indicators"])
+            tag = "high" if t["risk_score"] >= 50 else "medium" if t["risk_score"] >= 20 else "low"
+            self.tree_threats.insert("", "end",
+                                     values=(t["risk_score"], t["name"], t["pid"], ind,
+                                             f"{t['cpu']}%", f"{t['memory_mb']} MB", t["user"]),
+                                     tags=(tag,))
+        self.tree_threats.tag_configure("high", foreground="#dc2626")
+        self.tree_threats.tag_configure("medium", foreground="#d97706")
+        self.tree_threats.tag_configure("low", foreground="#64748b")
+
     def build_statusbar(self):
         sb = tk.Frame(self.root, bg=THEME["bg_secondary"], bd=1, relief="solid", highlightbackground=THEME["border"])
         sb.pack(fill="x", side="bottom")
@@ -625,6 +789,7 @@ class DesktopAppGUI:
                 self.root.after(0, self.refresh_analytics)
                 self.root.after(0, self.refresh_logs)
                 self.root.after(0, self.refresh_radar)
+                self.root.after(0, self.refresh_threats)
 
                 time.sleep(self.engine.polling_interval)
 
