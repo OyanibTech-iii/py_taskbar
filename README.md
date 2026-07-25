@@ -14,12 +14,15 @@ A 100% Python native desktop application monitor with a minimalist gray & white 
 
 ```
 app-tracker-desktop/
-├── desktop_app.py          # Main desktop GUI (tkinter, 7 tabs)
+├── desktop_app.py          # Entry point — auth flow then launches GUI
+├── auth.py                 # AuthManager (PIN hashing, config) + auth UI
+├── gui.py                  # DesktopAppGUI — 7-tab tkinter interface
+├── engine.py               # AppTrackerEngine — process polling, threat analysis
+├── theme.py                # THEME color/font constants
 ├── app.py                  # Web server mode on port 3000
 ├── python_tracker.py       # Background CLI daemon script
 ├── README.md
-├── .gitignore
-├── bun.lock                # (legacy, not required for Python)
+└── .gitignore
 ```
 
 ---
