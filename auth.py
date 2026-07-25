@@ -46,6 +46,10 @@ def build_auth_ui(root, auth, on_success):
     root.geometry("1024x680")
     root.minsize(800, 500)
     root.configure(bg=THEME["bg_main"])
+    try:
+        root.iconbitmap("at/favicon.ico")
+    except Exception:
+        pass
     root.update_idletasks()
     wx = (root.winfo_screenwidth() - 1024) // 2
     wy = (root.winfo_screenheight() - 680) // 2
@@ -60,8 +64,18 @@ def build_auth_ui(root, auth, on_success):
 
     def show_page(title, subtitle, body_builder, btn_text, btn_cmd):
         clear()
-        logo = tk.Label(container, text="AT", bg=THEME["bg_dark"], fg="#ffffff",
-                        font=(THEME["font_mono"], 22, "bold"), width=3, height=1)
+        logo_img = None
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open("at_logo.png").resize((64, 64), Image.LANCZOS)
+            logo_img = ImageTk.PhotoImage(img)
+        except Exception:
+            pass
+        logo = tk.Label(container, image=logo_img, bg=THEME["bg_main"] if logo_img else THEME["bg_dark"],
+                        text="" if logo_img else "AT", fg="#ffffff",
+                        font=(THEME["font_mono"], 22, "bold"), width=3 if not logo_img else 0,
+                        height=1 if not logo_img else 0)
+        logo.image = logo_img
         logo.pack(pady=(50, 12))
         tk.Label(container, text=title, bg=THEME["bg_main"],
                  fg=THEME["text_primary"], font=(THEME["font_family"], 18, "bold")).pack()

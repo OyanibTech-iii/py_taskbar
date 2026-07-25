@@ -20,6 +20,10 @@ class DesktopAppGUI:
         self.root.geometry("1024x680")
         self.root.minsize(800, 500)
         self.root.configure(bg=THEME["bg_main"])
+        try:
+            self.root.iconbitmap("at/favicon.ico")
+        except Exception:
+            pass
 
         self.setup_styles()
         self.build_header()
@@ -45,7 +49,18 @@ class DesktopAppGUI:
         inner.pack(fill="x", padx=20, pady=12)
         brand_frame = tk.Frame(inner, bg=THEME["bg_card"])
         brand_frame.pack(side="left")
-        logo_box = tk.Label(brand_frame, text="AT", bg=THEME["bg_dark"], fg="#ffffff", font=(THEME["font_mono"], 11, "bold"), width=3, height=1)
+        logo_img = None
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open("at_logo.png").resize((32, 32), Image.LANCZOS)
+            logo_img = ImageTk.PhotoImage(img)
+        except Exception:
+            pass
+        logo_box = tk.Label(brand_frame, image=logo_img, bg=THEME["bg_card"] if logo_img else THEME["bg_dark"],
+                            text="" if logo_img else "AT", fg="#ffffff",
+                            font=(THEME["font_mono"], 11, "bold"), width=3 if not logo_img else 0,
+                            height=1 if not logo_img else 0)
+        logo_box.image = logo_img
         logo_box.pack(side="left", padx=(0, 10))
         title_label = tk.Label(brand_frame, text="AppTracker Desktop", bg=THEME["bg_card"], fg=THEME["text_primary"], font=(THEME["font_family"], 13, "bold"))
         title_label.pack(anchor="w")
