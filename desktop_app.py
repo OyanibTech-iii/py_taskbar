@@ -930,12 +930,12 @@ class AuthManager:
 
 def build_auth_ui(root, auth, on_success):
     root.title("AppTracker — Authentication")
-    root.geometry("440x480")
-    root.resizable(False, False)
+    root.geometry("1024x680")
+    root.minsize(800, 500)
     root.configure(bg=THEME["bg_main"])
     root.update_idletasks()
-    wx = (root.winfo_screenwidth() - 440) // 2
-    wy = (root.winfo_screenheight() - 480) // 2
+    wx = (root.winfo_screenwidth() - 1024) // 2
+    wy = (root.winfo_screenheight() - 680) // 2
     root.geometry(f"+{wx}+{wy}")
 
     container = tk.Frame(root, bg=THEME["bg_main"])
@@ -957,6 +957,7 @@ def build_auth_ui(root, auth, on_success):
                      fg=THEME["text_secondary"], font=(THEME["font_family"], 10)).pack(pady=(4, 16))
         err_lbl = tk.Label(container, text="", bg=THEME["bg_main"], fg="#dc2626",
                            font=(THEME["font_family"], 9))
+        err_lbl.pack()
         def set_err(msg):
             err_lbl.config(text=msg)
         body_builder(container, set_err)
