@@ -357,6 +357,11 @@ class DesktopAppGUI:
         self.notebook.add(self.tab_security, text="Security Scan")
         self.build_security_tab()
 
+        # Tab 7: Top Consumers
+        self.tab_consumers = tk.Frame(self.notebook, bg=THEME["bg_main"])
+        self.notebook.add(self.tab_consumers, text="Top Consumers")
+        self.build_top_consumers_tab()
+
     def build_processes_tab(self):
         # Search Bar
         search_frame = tk.Frame(self.tab_processes, bg=THEME["bg_main"])
@@ -773,6 +778,93 @@ class DesktopAppGUI:
         with open(path, "w", encoding="utf-8") as f:
             f.write(content)
 
+    def build_top_consumers_tab(self):
+        container = tk.Frame(self.tab_consumers, bg=THEME["bg_main"])
+        container.pack(fill="both", expand=True)
+
+        header = tk.Frame(container, bg=THEME["bg_main"])
+        header.pack(fill="x", pady=(12, 0))
+        tk.Label(header, text="Top Resource Consumers — ranked by CPU usage",
+                 bg=THEME["bg_main"], fg=THEME["text_primary"],
+                 font=(THEME["font_family"], 12, "bold")).pack(side="left", padx=20)
+        btn = tk.Button(header, text="Export CSV", bg=THEME["bg_dark"], fg="#ffffff",
+                        relief="flat", font=(THEME["font_family"], 9, "bold"), padx=12, pady=3,
+                        command=self.export_consumers_csv)
+        btn.pack(side="right", padx=20)
+
+        cols = ("Rank", "Process Name", "CPU %", "RAM (MB)", "Category", "Analysis")
+        self.tree_consumers = ttk.Treeview(container, columns=cols, show="headings", selectmode="browse")
+        widths = [60, 240, 80, 90, 120, 350]
+        for c, w in zip(cols, widths):
+            self.tree_consumers.heading(c, text=c)
+            self.tree_consumers.column(c, width=w, anchor="w")
+        self.tree_consumers.column("Rank", anchor="center")
+        self.tree_consumers.column("CPU %", anchor="e")
+        self.tree_consumers.column("RAM (MB)", anchor="e")
+
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self.tree_consumers.yview)
+        self.tree_consumers.configure(yscroll=scrollbar.set)
+        self.tree_consumers.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=15)
+        scrollbar.pack(side="right", fill="y", padx=(0, 20), pady=15)
+
+        self.consumer_summary = tk.Label(container, text="", bg=THEME["bg_main"],
+                                         fg=THEME["text_secondary"], font=(THEME["font_family"], 10))
+        self.consumer_summary.pack(padx=20, pady=(0, 12), anchor="w")
+
+        self.refresh_top_consumers()
+
+    def refresh_top_consumers(self):
+        for item in self.tree_consumers.get_children():
+            self.tree_consumers.delete(item)
+        procs = sorted(self.engine.processes, key=lambda p: p['cpu'], reverse=True)[:10]
+        if not procs:
+            self.consumer_summary.config(text="No process data available")
+            return
+        total_cpu = sum(p['cpu'] for p in self.engine.processes)
+        total_ram = sum(p['memory_mb'] for p in self.engine.processes)
+        avg_cpu_top10 = sum(p['cpu'] for p in procs) / max(len(procs), 1)
+        for rank, p in enumerate(procs, 1):
+            analysis = []
+            cpu_share = (p['cpu'] / max(total_cpu, 1)) * 100
+            ram_share = (p['memory_mb'] / max(total_ram, 1)) * 100
+            if cpu_share > 30:
+                analysis.append(f"Dominant CPU: {cpu_share:.0f}% of all processes")
+            elif p['cpu'] > avg_cpu_top10 * 1.2:
+                analysis.append(f"Above avg CPU ({avg_cpu_top10:.1f}% avg)")
+            if p['memory_mb'] > 500:
+                analysis.append(f"High RAM footprint ({p['memory_mb']:.0f} MB)")
+            if ram_share > 25:
+                analysis.append(f"RAM-heavy: {ram_share:.0f}% of total")
+            if p['cpu'] < 1 and p['category'] in ("System", "Productivity"):
+                analysis.append("Background process, idle CPU")
+            if p['category'] in ("Browser", "Development", "Entertainment"):
+                analysis.append(f"Expected high-use category ({p['category']})")
+            if not analysis:
+                analysis.append("Moderate resource usage")
+            self.tree_consumers.insert("", "end", values=(
+                f"#{rank}", p['name'], f"{p['cpu']}%", f"{p['memory_mb']:.0f}", p['category'],
+                "; ".join(analysis[:3])
+            ))
+        self.consumer_summary.config(
+            text=f"Top 10 account for {sum(p['cpu'] for p in procs):.1f}% CPU  ·  "
+                 f"{sum(p['memory_mb'] for p in procs):.0f} MB RAM  ·  "
+                 f"{len([p for p in procs if p['cpu'] > 20])} processes above 20% CPU"
+        )
+
+    def export_consumers_csv(self):
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile="top_consumers.csv"
+        )
+        if not path:
+            return
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            f.write('"Rank","Process Name","CPU %","RAM (MB)","Category","Analysis"\n')
+            for item in self.tree_consumers.get_children():
+                vals = self.tree_consumers.item(item, "values")
+                f.write(','.join(f'"{v}"' for v in vals) + '\n')
+
     def start_background_thread(self):
         def loop():
             while True:
@@ -790,6 +882,7 @@ class DesktopAppGUI:
                 self.root.after(0, self.refresh_logs)
                 self.root.after(0, self.refresh_radar)
                 self.root.after(0, self.refresh_threats)
+                self.root.after(0, self.refresh_top_consumers)
 
                 time.sleep(self.engine.polling_interval)
 
